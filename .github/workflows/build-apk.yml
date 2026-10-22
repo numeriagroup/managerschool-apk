@@ -8,8 +8,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -19,8 +17,254 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Generate project files
+        run: |
+          mkdir -p "$(dirname 'settings.gradle')"
+          cat > 'settings.gradle' <<'MSEOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = "ManagerSchool"
+          include ':app'
+          MSEOF
+          mkdir -p "$(dirname 'build.gradle')"
+          cat > 'build.gradle' <<'MSEOF'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+          }
+          MSEOF
+          mkdir -p "$(dirname 'gradle.properties')"
+          cat > 'gradle.properties' <<'MSEOF'
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          org.gradle.jvmargs=-Xmx2048m
+          MSEOF
+          mkdir -p "$(dirname 'app/build.gradle')"
+          cat > 'app/build.gradle' <<'MSEOF'
+          plugins { id 'com.android.application' }
+          
+          android {
+              namespace 'online.managerschool.app'
+              compileSdk 34
+          
+              defaultConfig {
+                  applicationId "online.managerschool.app"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+          
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      signingConfig signingConfigs.debug   // so "assembleRelease" is installable without extra setup
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.7.0'
+              implementation 'androidx.webkit:webkit:1.11.0'
+              implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+          }
+          MSEOF
+          mkdir -p "$(dirname 'app/src/main/AndroidManifest.xml')"
+          cat > 'app/src/main/AndroidManifest.xml' <<'MSEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+          
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+          
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="@string/app_name"
+                  android:roundIcon="@mipmap/ic_launcher"
+                  android:supportsRtl="true"
+                  android:usesCleartextTraffic="false"
+                  android:theme="@style/AppTheme">
+          
+                  <activity
+                      android:name=".MainActivity"
+                      android:configChanges="orientation|screenSize|keyboardHidden"
+                      android:exported="true"
+                      android:windowSoftInputMode="adjustResize"
+                      android:theme="@style/AppTheme">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          MSEOF
+          mkdir -p "$(dirname 'app/src/main/java/online/managerschool/app/MainActivity.java')"
+          cat > 'app/src/main/java/online/managerschool/app/MainActivity.java' <<'MSEOF'
+          package online.managerschool.app;
+          
+          import android.annotation.SuppressLint;
+          import android.os.Bundle;
+          import android.view.KeyEvent;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceError;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import androidx.appcompat.app.AppCompatActivity;
+          import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+          
+          public class MainActivity extends AppCompatActivity {
+          
+              private static final String START_URL = "https://app.managerschool.online/login.php";
+              private static final String HOST = "app.managerschool.online";
+          
+              private WebView web;
+              private SwipeRefreshLayout swipe;
+          
+              @SuppressLint("SetJavaScriptEnabled")
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  setContentView(R.layout.activity_main);
+          
+                  swipe = findViewById(R.id.swipe);
+                  web = findViewById(R.id.webview);
+          
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setDatabaseEnabled(true);
+                  s.setLoadWithOverviewMode(true);
+                  s.setUseWideViewPort(true);
+                  s.setSupportZoom(true);
+                  s.setBuiltInZoomControls(true);
+                  s.setDisplayZoomControls(false);
+                  s.setCacheMode(WebSettings.LOAD_DEFAULT);
+                  s.setMediaPlaybackRequiresUserGesture(false);
+          
+                  web.setWebChromeClient(new WebChromeClient());
+                  web.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
+                          String host = req.getUrl().getHost();
+                          // keep in-app navigation on our own host; let the system handle the rest
+                          if (host != null && host.endsWith("managerschool.online")) return false;
+                          startActivity(new android.content.Intent(
+                                  android.content.Intent.ACTION_VIEW, req.getUrl()));
+                          return true;
+                      }
+                      @Override
+                      public void onPageFinished(WebView view, String url) { swipe.setRefreshing(false); }
+                      @Override
+                      public void onReceivedError(WebView view, WebResourceRequest req, WebResourceError err) {
+                          swipe.setRefreshing(false);
+                      }
+                  });
+          
+                  swipe.setOnRefreshListener(() -> web.reload());
+          
+                  if (savedInstanceState != null) web.restoreState(savedInstanceState);
+                  else web.loadUrl(START_URL);
+              }
+          
+              @Override
+              public boolean onKeyDown(int keyCode, KeyEvent event) {
+                  if (keyCode == KeyEvent.KEYCODE_BACK && web.canGoBack()) { web.goBack(); return true; }
+                  return super.onKeyDown(keyCode, event);
+              }
+          
+              @Override
+              protected void onSaveInstanceState(Bundle outState) {
+                  super.onSaveInstanceState(outState);
+                  web.saveState(outState);
+              }
+          }
+          MSEOF
+          mkdir -p "$(dirname 'app/src/main/res/layout/activity_main.xml')"
+          cat > 'app/src/main/res/layout/activity_main.xml' <<'MSEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/swipe"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent">
+          
+              <WebView
+                  android:id="@+id/webview"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"/>
+          </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+          MSEOF
+          mkdir -p "$(dirname 'app/src/main/res/values/strings.xml')"
+          cat > 'app/src/main/res/values/strings.xml' <<'MSEOF'
+          <resources>
+              <string name="app_name">Manager School</string>
+          </resources>
+          MSEOF
+          mkdir -p "$(dirname 'app/src/main/res/values/colors.xml')"
+          cat > 'app/src/main/res/values/colors.xml' <<'MSEOF'
+          <resources>
+              <color name="brand">#2563EB</color>
+              <color name="brand_dark">#1E40AF</color>
+              <color name="splash_bg">#0F172A</color>
+          </resources>
+          MSEOF
+          mkdir -p "$(dirname 'app/src/main/res/values/themes.xml')"
+          cat > 'app/src/main/res/values/themes.xml' <<'MSEOF'
+          <resources>
+              <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
+                  <item name="android:statusBarColor">@color/brand_dark</item>
+                  <item name="android:windowBackground">@color/splash_bg</item>
+              </style>
+          </resources>
+          MSEOF
+          mkdir -p "$(dirname 'app/src/main/res/drawable/ic_launcher_foreground.xml')"
+          cat > 'app/src/main/res/drawable/ic_launcher_foreground.xml' <<'MSEOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#FFFFFF"
+                  android:pathData="M30,66 L54,30 L78,66 L68,66 L54,46 L40,66 Z M44,72 L64,72 L64,78 L44,78 Z"/>
+          </vector>
+          MSEOF
+          mkdir -p "$(dirname 'app/src/main/res/drawable/ic_launcher_background.xml')"
+          cat > 'app/src/main/res/drawable/ic_launcher_background.xml' <<'MSEOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#2563EB" android:pathData="M0,0 h108 v108 h-108 z"/>
+          </vector>
+          MSEOF
+          mkdir -p "$(dirname 'app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml')"
+          cat > 'app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml' <<'MSEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_launcher_background"/>
+              <foreground android:drawable="@drawable/ic_launcher_foreground"/>
+          </adaptive-icon>
+          MSEOF
+          mkdir -p "$(dirname 'app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml')"
+          cat > 'app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml' <<'MSEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_launcher_background"/>
+              <foreground android:drawable="@drawable/ic_launcher_foreground"/>
+          </adaptive-icon>
+          MSEOF
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
